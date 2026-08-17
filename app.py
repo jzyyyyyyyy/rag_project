@@ -1,34 +1,36 @@
-import streamlit as st
+import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
-from qa_system import (
-    build_embeddings,
-    build_llm,
-    build_hybrid_retriever,
-    build_condense_chain,
-    build_qa_chain,
-    ask,
-)
+import streamlit as st
+from langchain_chroma import Chroma
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+from langchain_core.output_parsers import StrOutputParser
+
 from config import (
+    VECTOR_DB_PATH,
     EMBEDDING_MODEL_NAME,
+    EMBEDDING_DEVICE,
+    EMBEDDING_NORMALIZE,
+    DEEPSEEK_API_KEY,
+    LLM_BASE_URL,
     LLM_MODEL,
+    LLM_TEMPERATURE,
     RETRIEVAL_TOP_K,
-    HYBRID_WEIGHTS,
-    PROMPT_TEMPLATES,
-    DEFAULT_PROMPT_STYLE,
-    SEMANTIC_MAX_CHUNK,
 )
 
 # ---------- 页面基础配置 ----------
 st.set_page_config(
     page_title="RAG 知识库智能问答助手",
-    page_icon="",
+    page_icon="📚",
     layout="wide",
 )
 
-st.title("基于 RAG 的知识库智能问答助手")
+st.title("📚 基于 RAG 的知识库智能问答助手")
 st.caption(
     "技术栈：LangChain + Chroma 向量数据库 + DeepSeek 大模型 + text2vec 中文嵌入模型"
-    "　|　语义分块 + 混合检索（向量+BM25） + 多轮对话记忆"
 )
 st.divider()
 
@@ -36,28 +38,78 @@ st.divider()
 # ---------- 缓存加载系统 ----------
 @st.cache_resource
 def init_qa_system():
-    """初始化嵌入模型、LLM、混合检索器，结果缓存，只运行一次"""
-    embeddings = build_embeddings()
-    llm = build_llm()
-    retriever, db = build_hybrid_retriever(embeddings)
-    condense_chain = build_condense_chain(llm)
-    return llm, retriever, db, condense_chain
+    """初始化整个问答系统，结果缓存，只运行一次"""
+    # 1. 嵌入模型
+    embeddings = HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL_NAME,
+        model_kwargs={"device": EMBEDDING_DEVICE},
+        encode_kwargs={"normalize_embeddings": EMBEDDING_NORMALIZE},
+    )
 
+    # 2. 加载 Chroma 向量库
+    db = Chroma(
+        persist_directory=VECTOR_DB_PATH,
+        embedding_function=embeddings,
+    )
+    retriever = db.as_retriever(search_kwargs={"k": RETRIEVAL_TOP_K})
 
-# ---------- 初始化聊天历史（必须在调用 init_qa_system 之前） ----------
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+    # 3. 大语言模型
+    llm = ChatOpenAI(
+        api_key=DEEPSEEK_API_KEY,
+        base_url=LLM_BASE_URL,
+        model=LLM_MODEL,
+        temperature=LLM_TEMPERATURE,
+    )
+
+    # 4. Prompt 模板
+    prompt_template = """
+请根据以下【参考资料】回答问题。回答时请尽量引用原文关键句，并用自己的话解释。如果参考资料中没有直接答案，请根据已有信息推测，并注明"推测"。若完全无相关信息，再回答"无法回答"。
+
+回答规则：
+1. 只使用参考资料中的信息，不要编造资料中没有的内容
+2. 如果参考资料中没有相关信息，根据已有资料进行推测，并需要标明推测的过程和原因。
+3. 回答要条理清晰，重点突出
+4. 可以适当引用资料中的原文表述
+
+【参考资料】
+{context}
+
+【用户问题】
+{question}
+
+【你的回答】
+"""
+    prompt = ChatPromptTemplate.from_template(prompt_template)
+
+    # 5. 构建 LCEL 链
+    def format_docs(docs):
+        return "\n\n".join(doc.page_content for doc in docs)
+
+    qa_chain = (
+            RunnableParallel(
+                {
+                    "context": retriever | format_docs,
+                    "question": RunnablePassthrough(),
+                }
+            )
+            | prompt
+            | llm
+            | StrOutputParser()
+    )
+
+    return qa_chain, retriever
+
 
 # ---------- 初始化系统 ----------
 with st.spinner("系统正在初始化，请稍候（第一次加载嵌入模型需要几分钟）..."):
-    llm, retriever, db, condense_chain = init_qa_system()
+    qa_chain, retriever = init_qa_system()
 
-st.success("系统初始化完成，可以开始提问了！")
+st.success("✅ 系统初始化完成，可以开始提问了！")
 st.divider()
 
 # ---------- 侧边栏 ----------
 with st.sidebar:
-    st.header("系统信息")
+    st.header("⚙️ 系统信息")
     st.info(
         f"""
         **嵌入模型**：{EMBEDDING_MODEL_NAME}
@@ -66,67 +118,89 @@ with st.sidebar:
 
         **向量数据库**：Chroma（本地）
 
-        **分块方式**：语义分块（≤{SEMANTIC_MAX_CHUNK} 字符）
-
-        **检索方式**：向量 + BM25 混合检索（权重 {HYBRID_WEIGHTS[0]}:{HYBRID_WEIGHTS[1]}）
-
         **检索片段数**：Top-{RETRIEVAL_TOP_K}
+
+        **分块大小**：256 字符
         """
     )
     st.divider()
-    st.header("回答风格")
-    prompt_style = st.selectbox(
-        "选择 Prompt 风格",
-        options=list(PROMPT_TEMPLATES.keys()),
-        index=list(PROMPT_TEMPLATES.keys()).index(DEFAULT_PROMPT_STYLE),
-        help="严谨：资料中没有就直说，禁止推测；平衡：允许推测但必须标明；宽松：回答更灵活",
-    )
-    st.divider()
-    st.header("使用说明")
+    
+    st.header("📖 使用说明")
     st.write("1. 在下方输入框输入你的问题")
-    st.write("2. 支持多轮追问（如：它的核心思想是什么？）")
-    st.write("3. 回答下方可展开查看参考原文（按相似度从高到低排序）")
+    st.write("2. 按回车发送，系统会自动检索知识库")
+    st.write("3. 回答下方可展开查看参考原文")
     st.write("4. 问题答案都来自你上传的文档")
-
-# ---------- 问答链（Prompt 风格可切换，轻量无需缓存） ----------
-qa_chain = build_qa_chain(llm, prompt_style)
+    
+    st.divider()
+    st.header("📤 上传文档到知识库")
+    uploaded_files = st.file_uploader(
+        "支持 PDF / TXT / DOCX / MD",
+        type=["pdf", "txt", "docx", "md"],
+        accept_multiple_files=True,
+        key="uploader"
+    )
+    if uploaded_files:
+        if st.button("🚀 添加到知识库"):
+            import os
+            from config import KNOWLEDGE_DIR
+            
+            with st.spinner("正在处理文档..."):
+                for uploaded_file in uploaded_files:
+                    save_path = os.path.join(KNOWLEDGE_DIR, uploaded_file.name)
+                    with open(save_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                st.success(f"✅ 已添加 {len(uploaded_files)} 个文档到 knowledge_base 文件夹")
+                st.info("💡 请运行 build_database.py 重建向量库，或重启应用自动加载")
 
 # ---------- 聊天界面 ----------
-# 显示历史消息
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 if user_input := st.chat_input("请输入你想问的问题..."):
-    # 显示用户问题
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # 生成回答
     with st.chat_message("assistant"):
-        with st.spinner("正在检索知识库并生成回答..."):
-            history = [
-                (msg["role"], msg["content"])
-                for msg in st.session_state.chat_history
-            ]
-            answer, sorted_docs = ask(
-                qa_chain, condense_chain, retriever, db, user_input, history
-            )
+        with st.spinner("🔍 正在检索知识库并生成回答..."):
+            source_docs = retriever.invoke(user_input)
+            answer = qa_chain.invoke(user_input)
 
         st.markdown(answer)
 
-        # 可折叠的参考原文（已按相似度从高到低排序）
-        with st.expander("查看参考原文片段（按相似度从高到低排序）"):
-            for i, (doc, score) in enumerate(sorted_docs):
+        # ===== 用户反馈按钮 =====
+        feedback_key = f"feedback_{len(st.session_state.chat_history)}"
+        
+        st.divider()
+        col1, col2, col3 = st.columns([1, 1, 4])
+        with col1:
+            if st.button("👍 有用", key=f"{feedback_key}_like"):
+                st.session_state[feedback_key] = "liked"
+                st.success("感谢您的反馈！")
+        with col2:
+            if st.button("👎 无用", key=f"{feedback_key}_dislike"):
+                st.session_state[feedback_key] = "disliked"
+                st.warning("请告诉我们哪里有问题：")
+                feedback_text = st.text_area("反馈内容", key=f"{feedback_key}_text")
+                if st.button("提交反馈", key=f"{feedback_key}_submit"):
+                    with open("feedback_log.txt", "a", encoding="utf-8") as f:
+                        f.write(f"问题: {user_input}\n")
+                        f.write(f"回答: {answer}\n")
+                        f.write(f"反馈: {feedback_text}\n")
+                        f.write("-" * 50 + "\n")
+                    st.success("感谢您的反馈，已记录！")
+
+        with st.expander("📖 查看参考原文片段"):
+            for i, doc in enumerate(source_docs):
                 source = doc.metadata.get("source", "未知")
-                score_text = "未知" if score == float("inf") else f"{score:.4f}"
-                st.markdown(f"**片段 {i + 1}**（来源：{source}｜距离分数：{score_text}，越小越相似）")
+                st.markdown(f"**片段 {i + 1}**（来源：{source}）")
                 st.write(doc.page_content)
                 st.divider()
 
     st.session_state.chat_history.append(
         {"role": "assistant", "content": answer}
     )
-    # 只保留最近 6 条消息（3 轮对话），避免历史过长
-    st.session_state.chat_history = st.session_state.chat_history[-6:]
