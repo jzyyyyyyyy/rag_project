@@ -161,6 +161,11 @@ with st.sidebar:
     st.header("📤 上传文档到知识库")
     if "upload_round" not in st.session_state:
         st.session_state.upload_round = 0
+    if "upload_notice" not in st.session_state:
+        st.session_state.upload_notice = None
+    if st.session_state.upload_notice:
+        st.success(st.session_state.upload_notice)
+        st.session_state.upload_notice = None
     uploaded_files = st.file_uploader(
         "支持 PDF / TXT / DOCX / MD",
         type=["pdf", "txt", "docx", "md"],
@@ -182,10 +187,11 @@ with st.sidebar:
 
                 # 1. 保存文件到 user_docs（重名直接覆盖）
                 new_files = []
+                overwritten = []
                 for uploaded_file in uploaded_files:
                     save_path = os.path.join(USER_DOCS_DIR, uploaded_file.name)
                     if os.path.exists(save_path):
-                        st.info(f"📝 {uploaded_file.name} 已存在，将覆盖旧版本")
+                        overwritten.append(uploaded_file.name)
                     with open(save_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
                     new_files.append(uploaded_file.name)
@@ -226,11 +232,15 @@ with st.sidebar:
                 with open(chunks_file, "w", encoding="utf-8") as f:
                     json.dump(new_chunks, f, ensure_ascii=False, indent=2)
 
-                st.success(f"✅ 已添加 {len(new_files)} 个文档：{', '.join(new_files)}")
-                st.info(f"💡 共向量化 {len(split_docs)} 个文本块，现在可以直接提问了")
+                notice = f"✅ 已添加 {len(new_files)} 个文档：{', '.join(new_files)}"
+                if overwritten:
+                    notice += f"（{'、'.join(overwritten)} 已覆盖旧版本）"
+                notice += f"，共向量化 {len(split_docs)} 个文本块，现在可以直接提问了"
+                st.session_state.upload_notice = notice
 
                 # 重置上传组件，清空已选文件
                 st.session_state.upload_round += 1
+                st.rerun()
 
 # ---------- 聊天界面 ----------
 if "chat_history" not in st.session_state:
