@@ -11,6 +11,10 @@ langchain-openai>=0.1.0          # 调用 DeepSeek（OpenAI兼容接口）
 langchain-huggingface>=0.0.1     # 加载本地嵌入模型
 langchain-chroma>=0.1.0          # Chroma 向量数据库集成
 langchain-text-splitters>=0.2.0  # 文本分割器
+langchain-classic>=1.0.8         # EnsembleRetriever（本机 langchain 1.x 已移除，需此兼容包）
+
+# 检索算法
+rank-bm25>=0.2.2                 # BM25 关键词检索，混合检索依赖
 
 # 向量数据库底层
 chromadb>=0.4.0
