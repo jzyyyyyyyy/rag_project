@@ -28,14 +28,25 @@
 - `SEMANTIC_OVERLAP_SENTS` 由 1 改为 2:解决断点落在"过渡句"时,预告句与正文内容分离的问题(实测"梁漱溟文化观"片段:过渡句与"他主张:第一…"正文现同处一块,检索命中即可获得完整上下文)
 - 向量库已用新参数重建:1465 块 → **1502 块**(块间重叠增加 1 句所致),重建同时清除了网页上传测试残留的孤儿文本块
 
-### 4. 验证结果
+### 4. 用户上传目录分离(2026-08-17 追加)
+
+| 位置 | 原实现 | 新实现 |
+|------|--------|--------|
+| 存储目录 | 上传文件与项目自带文档同存 `knowledge_base/` | 新增 `user_docs/` 目录,上传文件单独存放,与项目自带 PDF 分开 |
+| `config.py` | 仅 `KNOWLEDGE_DIR` | 新增 `USER_DOCS_DIR = "./user_docs"` |
+| `build_database.py` | 只遍历 knowledge_base | `load_documents()` 用 `itertools.chain` 同时遍历 knowledge_base 与 user_docs,全量重建不会丢用户上传 |
+| `app.py` | 上传保存到 KNOWLEDGE_DIR,删除按该路径匹配 | 保存/删除/覆盖改用 USER_DOCS_DIR;侧边栏分"项目自带/用户上传"两组展示 |
+| 向量库 | source 混用 knowledge_base 路径 | 已重建,source 分别指向两个目录,旧路径残留清零 |
+
+### 5. 验证结果
 
 | 测试 | 结果 |
 |------|------|
 | 语法检查 | py_compile 全部通过 |
 | Streamlit 启动 | 后台启动成功,http://localhost:8501 返回 200 |
+| 向量库 source | 1500 块指向 knowledge_base/PDF,2 块指向 user_docs/数学.txt,无残留 |
 
-### 4. 遗留说明
+### 6. 遗留说明
 
 - 网页端增量入库与 `build_database.py` 全量重建互不冲突:上传走增量,重建走清库,两者最终状态一致
 - 覆盖重名文档依赖 Chroma 按 `source` 元数据删除,请勿修改 load_documents 中 source 路径的拼接方式

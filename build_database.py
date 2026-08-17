@@ -4,6 +4,7 @@ os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import os
 import json
 import shutil
+from itertools import chain
 from langchain_community.document_loaders import (
     DirectoryLoader,
     PyPDFLoader,
@@ -18,6 +19,7 @@ from semantic_splitter import split_documents_semantic
 
 from config import (
     KNOWLEDGE_DIR,
+    USER_DOCS_DIR,
     VECTOR_DB_PATH,
     SEMANTIC_BREAKPOINT_PERCENTILE,
     SEMANTIC_THRESHOLD_FLOOR,
@@ -31,17 +33,18 @@ from config import (
 def load_documents(only_files=None):
     """
     步骤1：加载知识库文件夹中的所有文档
-    手动遍历文件夹，根据后缀选择对应的加载器
-    支持 .pdf / .txt / .docx / .md
+    遍历 knowledge_base（项目自带）与 user_docs（用户上传）两个目录，
+    根据后缀选择对应的加载器，支持 .pdf / .txt / .docx / .md
     only_files：只加载指定文件名（用于网页上传后的增量入库）
     """
     print("=" * 60)
     print("步骤1：正在加载知识库文档...")
     print(f" 知识库路径：{KNOWLEDGE_DIR}")
+    print(f" 用户上传路径：{USER_DOCS_DIR}")
 
     docs = []
-    # 遍历文件夹
-    for root, dirs, files in os.walk(KNOWLEDGE_DIR):
+    # 遍历两个目录
+    for root, dirs, files in chain(os.walk(KNOWLEDGE_DIR), os.walk(USER_DOCS_DIR)):
         for file in files:
             if only_files is not None and file not in only_files:
                 continue
@@ -174,8 +177,8 @@ def main():
     # 1. 加载文档
     docs = load_documents()
     if len(docs) == 0:
-        print("错误：knowledge_base 文件夹中没有找到文档！")
-        print(" 请把 pdf/txt/docx/md 文件放进 knowledge_base 文件夹后再运行。")
+        print("错误：知识库文件夹中没有找到文档！")
+        print(" 请把 pdf/txt/docx/md 文件放进 knowledge_base 或 user_docs 文件夹后再运行。")
         return
 
     # 2. 初始化嵌入模型（语义分块和向量化共用）

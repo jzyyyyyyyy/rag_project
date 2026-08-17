@@ -11,6 +11,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from config import (
     KNOWLEDGE_DIR,
+    USER_DOCS_DIR,
     VECTOR_DB_PATH,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_DEVICE,
@@ -135,6 +136,7 @@ with st.sidebar:
     st.divider()
 
     st.header("📚 知识库文档")
+    st.caption("项目自带:")
     kb_files = sorted(
         f for f in os.listdir(KNOWLEDGE_DIR)
         if os.path.isfile(os.path.join(KNOWLEDGE_DIR, f))
@@ -143,7 +145,17 @@ with st.sidebar:
         for name in kb_files:
             st.write(f"📄 {name}")
     else:
-        st.write("（暂无文档）")
+        st.write("（无）")
+    st.caption("用户上传:")
+    user_files = sorted(
+        f for f in os.listdir(USER_DOCS_DIR)
+        if os.path.isfile(os.path.join(USER_DOCS_DIR, f))
+    )
+    if user_files:
+        for name in user_files:
+            st.write(f"📄 {name}")
+    else:
+        st.write("（无）")
 
     st.divider()
     st.header("📤 上传文档到知识库")
@@ -160,7 +172,6 @@ with st.sidebar:
             with st.spinner("正在保存并向量化新文档，请稍候..."):
                 import json
                 from config import (
-                    KNOWLEDGE_DIR,
                     SEMANTIC_BREAKPOINT_PERCENTILE,
                     SEMANTIC_THRESHOLD_FLOOR,
                     SEMANTIC_MAX_CHUNK,
@@ -169,10 +180,10 @@ with st.sidebar:
                 from build_database import load_documents
                 from semantic_splitter import split_documents_semantic
 
-                # 1. 保存文件到 knowledge_base（重名直接覆盖）
+                # 1. 保存文件到 user_docs（重名直接覆盖）
                 new_files = []
                 for uploaded_file in uploaded_files:
-                    save_path = os.path.join(KNOWLEDGE_DIR, uploaded_file.name)
+                    save_path = os.path.join(USER_DOCS_DIR, uploaded_file.name)
                     if os.path.exists(save_path):
                         st.info(f"📝 {uploaded_file.name} 已存在，将覆盖旧版本")
                     with open(save_path, "wb") as f:
@@ -197,7 +208,7 @@ with st.sidebar:
                     with open(chunks_file, "r", encoding="utf-8") as f:
                         old_chunks = json.load(f)
                 for name in new_files:
-                    source = os.path.join(KNOWLEDGE_DIR, name)
+                    source = os.path.join(USER_DOCS_DIR, name)
                     db.delete(where={"source": source})
                     old_chunks = [
                         c for c in old_chunks

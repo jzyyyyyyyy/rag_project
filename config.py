@@ -12,8 +12,10 @@ LLM_MODEL = "deepseek-chat"
 LLM_TEMPERATURE = 0.3
 
 # ---------- 知识库与向量库路径 ----------
-# 存放原始文档的文件夹（支持 pdf/txt/docx/md）
+# 存放项目自带文档的文件夹（支持 pdf/txt/docx/md）
 KNOWLEDGE_DIR = "./knowledge_base"
+# 用户网页上传文档的文件夹（与项目自带文档分开存放）
+USER_DOCS_DIR = "./user_docs"
 # 向量数据库保存路径
 VECTOR_DB_PATH = "./vector_db"
 
