@@ -1,4 +1,6 @@
 import os
+import json
+
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import streamlit as st
@@ -22,6 +24,10 @@ from config import (
     LLM_TEMPERATURE,
     RETRIEVAL_TOP_K,
 )
+
+# 确保目录存在（首次运行或目录被删除时自动创建，避免报错）
+os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+os.makedirs(USER_DOCS_DIR, exist_ok=True)
 
 # ---------- 页面基础配置 ----------
 st.set_page_config(
@@ -102,9 +108,51 @@ def init_qa_system():
     return qa_chain, retriever, embeddings, db
 
 
+def cleanup_orphan_chunks(db, chunks_file):
+    """
+    删除向量库中源文件已不存在的文本块（如手动删除了 user_docs 里的文件）。
+    同步清理 Chroma 与 chunks.json，返回清理的条数。
+    """
+    valid_sources = set()
+    for base in (KNOWLEDGE_DIR, USER_DOCS_DIR):
+        if os.path.isdir(base):
+            valid_sources.update(
+                os.path.join(base, f)
+                for f in os.listdir(base)
+                if os.path.isfile(os.path.join(base, f))
+            )
+
+    metadatas = db._collection.get(include=["metadatas"])["metadatas"]
+    orphan_sources = {
+        m.get("source")
+        for m in metadatas
+        if m and m.get("source") not in valid_sources
+    }
+    cleaned = 0
+    for source in orphan_sources:
+        db.delete(where={"source": source})
+        cleaned += 1
+    if cleaned > 0 and os.path.exists(chunks_file):
+        with open(chunks_file, "r", encoding="utf-8") as f:
+            chunks = json.load(f)
+        chunks = [
+            c for c in chunks
+            if c["metadata"].get("source") not in orphan_sources
+        ]
+        with open(chunks_file, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, ensure_ascii=False, indent=2)
+    return cleaned
+
+
 # ---------- 初始化系统 ----------
 with st.spinner("系统正在初始化，请稍候（第一次加载嵌入模型需要几分钟）..."):
     qa_chain, retriever, embeddings, db = init_qa_system()
+    orphan_count = cleanup_orphan_chunks(
+        db, os.path.join(VECTOR_DB_PATH, "chunks.json")
+    )
+
+if orphan_count:
+    st.warning(f"🧹 已自动清理 {orphan_count} 条失效文档的向量（源文件已不存在）")
 
 st.success("✅ 系统初始化完成，可以开始提问了！")
 st.divider()
@@ -175,7 +223,6 @@ with st.sidebar:
     if uploaded_files:
         if st.button("🚀 添加到知识库"):
             with st.spinner("正在保存并向量化新文档，请稍候..."):
-                import json
                 from config import (
                     SEMANTIC_BREAKPOINT_PERCENTILE,
                     SEMANTIC_THRESHOLD_FLOOR,
@@ -241,6 +288,17 @@ with st.sidebar:
                 # 重置上传组件，清空已选文件
                 st.session_state.upload_round += 1
                 st.rerun()
+
+    st.divider()
+    if st.button("🧹 清理失效文档向量"):
+        with st.spinner("正在清理失效向量..."):
+            cleaned = cleanup_orphan_chunks(
+                db, os.path.join(VECTOR_DB_PATH, "chunks.json")
+            )
+        if cleaned:
+            st.success(f"已清理 {cleaned} 条失效文档向量")
+        else:
+            st.success("没有发现失效文档向量")
 
 # ---------- 聊天界面 ----------
 if "chat_history" not in st.session_state:

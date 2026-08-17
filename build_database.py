@@ -42,6 +42,10 @@ def load_documents(only_files=None):
     print(f" 知识库路径：{KNOWLEDGE_DIR}")
     print(f" 用户上传路径：{USER_DOCS_DIR}")
 
+    # 确保目录存在（首次运行或目录被删除时自动创建）
+    os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+    os.makedirs(USER_DOCS_DIR, exist_ok=True)
+
     docs = []
     # 遍历两个目录
     for root, dirs, files in chain(os.walk(KNOWLEDGE_DIR), os.walk(USER_DOCS_DIR)):

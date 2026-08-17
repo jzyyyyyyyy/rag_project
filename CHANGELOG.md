@@ -38,15 +38,25 @@
 | `app.py` | 上传保存到 KNOWLEDGE_DIR,删除按该路径匹配 | 保存/删除/覆盖改用 USER_DOCS_DIR;侧边栏分"项目自带/用户上传"两组展示 |
 | 向量库 | source 混用 knowledge_base 路径 | 已重建,source 分别指向两个目录,旧路径残留清零 |
 
-### 5. 验证结果
+### 5. 失效向量自动清理 + 目录自动重建(2026-08-17 追加)
+
+| 改进项 | 说明 |
+|--------|------|
+| 孤儿向量清理 | 新增 `cleanup_orphan_chunks()`:对比向量库 source 与实际文件,自动删除源文件已不存在的文本块(Chroma + chunks.json 同步),**启动时自动执行** |
+| 手动清理按钮 | 侧边栏新增"🧹 清理失效文档向量"按钮,会话中途删文件后可立即清理,无需重启 |
+| 目录自动重建 | app.py 启动与 build_database.py 建库前 `os.makedirs(exist_ok=True)` 自动创建 knowledge_base / user_docs,目录被删不报错 |
+| 上传提示重构 | 上传成功提示改存 `st.session_state.upload_notice`,处理后 `st.rerun()` 立即重置上传框(修复刷新才清空的 bug),覆盖信息合并进同一提示 |
+
+### 6. 验证结果
 
 | 测试 | 结果 |
 |------|------|
 | 语法检查 | py_compile 全部通过 |
 | Streamlit 启动 | 后台启动成功,http://localhost:8501 返回 200 |
-| 向量库 source | 1500 块指向 knowledge_base/PDF,2 块指向 user_docs/数学.txt,无残留 |
+| 向量库 source | 1500 块指向 knowledge_base/PDF,user_docs 两个文件已重新向量化(数学.txt 4 块、测试.txt 1 块) |
+| 目录缺失测试 | 移走 user_docs 后启动,AppTest 全脚本执行无异常并自动重建目录 |
 
-### 6. 遗留说明
+### 7. 遗留说明
 
 - 网页端增量入库与 `build_database.py` 全量重建互不冲突:上传走增量,重建走清库,两者最终状态一致
 - 覆盖重名文档依赖 Chroma 按 `source` 元数据删除,请勿修改 load_documents 中 source 路径的拼接方式
