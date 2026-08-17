@@ -27,7 +27,7 @@ SEMANTIC_THRESHOLD_FLOOR = 0.35
 # 单个语义块的最大字符数（防止话题过长产生超大块）
 SEMANTIC_MAX_CHUNK = 500
 # 相邻块重叠句数（缓解话题边界处信息丢失）
-SEMANTIC_OVERLAP_SENTS = 1
+SEMANTIC_OVERLAP_SENTS = 2
 
 
 # 使用中文开源嵌入模型，本地运行，免费
