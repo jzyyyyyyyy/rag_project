@@ -1,0 +1,18 @@
+1.
+# 原来的方式
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=80,
+    separators=["\n\n", "\n", "。", "！", "？", "，", "、", " ", ""],
+)
+
+# 改成语义分块
+from langchain.experimental.text_splitter import SemanticChunker
+
+text_splitter = SemanticChunker(
+    embeddings=embeddings,
+    breakpoint_threshold_type="percentile",
+    breakpoint_threshold_amount=95,
+    # 先按句子分割，再计算句子间语义距离
+)

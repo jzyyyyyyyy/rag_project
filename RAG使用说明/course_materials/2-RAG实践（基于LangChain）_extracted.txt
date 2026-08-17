@@ -1,0 +1,300 @@
+===== 2-RAG实践（基于LangChain）.pdf =====
+总页数: 35
+
+----- 第 1 页 -----
+LangChain
+ 
+RAG
+实践
+主讲人：龙鹏（笔名言有三）
+
+----- 第 2 页 -----
+•LangChain介绍与模块详解•LangChain RAG应用实战
+目录
+
+----- 第 3 页 -----
+LangChain
+介绍与模块详解
+
+----- 第 4 页 -----
+•一个用于开发基于语言模型的应用程序的开发框架
+https://github.com/langchain-ai/langchain
+安装方法：pip install langchain
+LangChain
+英文社区：https://python.langchain.com/en/latest/中文社区：https://www.langchain.cn/
+
+----- 第 5 页 -----
+•LangChain的特性
+LangChain
+① 中间件：LangChain是一个链接面向用户程序和LLM之间的一个中间层，支持各种模型类型和模型集成。② 受青睐：它在 2023 年 3 月获得了 Benchmark Capital 的 1000 万美元种子轮融资，后又拿到了红杉2000-2500万美金的融资，估值已经提升到了2亿美金左右。③ 端到端：LangChain 可以轻松管理与语言模型的交互，将多个组件链接在一起，并集成额外的资源，例如 API 和数据库。其组件包括了模型（各类LLM），提示模板（Prompts），索引，代理（Agent），记忆等等。④ COT鼻祖：Auto-GPT和BabyAGI所使用的链式思考能力都是由LangChain启发而来。
+
+----- 第 6 页 -----
+①Models：langchain使用的LLM（大语言模型），是langchain应用的大脑② Prompts：用于为LLM构建Prompt，通常以promptTemplate的形式组织③ Memory：用于维护和构建用户在跟大模型交互过程中的上下文记忆④ Indexes：用于检索，对于待检索的文档，基于该工具可以进行embedding并检索⑤ Chains：最核心的概念，每个chain就是一个任务链，基于它可以完成一个完整的任务。langchain定义了各种chain，每种chain可以执行某种特定的任务，例如文档问答chain、保险销售chain等。⑥ Agents：用来管理chain，即何时调用何种chain，何种LLM。基于agent可以构建更强大的智能体。⑦ Callbacks：回调函数，负责调用外部API，获取实时数据
+•LangChain的相关概念
+LangChain
+
+----- 第 7 页 -----
+•整体项目结构①langchain-core②langchain③langchain-community④LangGraph⑤LangServe⑥LangSmith
+LangChain
+模块
+https://python.langchain.com/v0.2/docs/introduction/
+最低安装依赖pip install langchain #会自动安装langchain-corepip install langchain-openaipip install langchain-community
+
+----- 第 8 页 -----
+•langchain-core包、langchain包、langchain-community包①langchain-core：langchain的核心实现，包含了不同组件的基本抽象和组合方式。核心组件（如 LLMs、向量存储、检索器等）的接口都在这里定义。此包不包含任何第三方集成，依赖项被有意保持得非常轻量。②langchain：包含了组成应用程序认知架构的chains, agents和retrieval strategies(检索策略)。所有的chains, agents和retrieval strategies(检索策略)都不是针对某一特定集成，而是适用于所有集成的通用功能。③langchain-community：包含了由 LangChain社区维护的第三方集成。关键合作伙伴的包被单独分离出来。此package(包)包含了各种组件的所有集成（如 LLMs、向量存储、检索器）。为了保持包的轻量化，此包中的所有依赖项都是可选的。虽然大多数集成都在 langchain-community 包中，但仍将一些流行的集成分离成它们自己的包（例如 langchain-openai、langchain-anthropic 等）。
+LangChain
+模块
+
+----- 第 9 页 -----
+•LangGraph，基于 LangChain构建的一种状态机驱动的智能体编排框架。
+LangChain
+模块
+https://langchain-ai.github.io/langgraph/
+✅ 更清晰的任务流程建模能力（流程图）
+✅ 支持复杂控制流（如循环、条件分支、并行）
+✅ 状态可持久化，适合长周期任务
+✅ 灵活集成 Tool、Memory、Agent 等组件
+通过图的形式构造LLM应用，旨在通过将步骤建模为图中的边和节点，将 Agent 系统建模设计为(有向图)流程图
+特性LangChain（Chain）LangGraph（Graph）控制流程线性可分支、循环、并行复杂度管理较难模块化、清晰可控多 Agent 协作较难实现易于设计多个节点交互适合任务类型单步/固定任务多步骤、有状态流程智能体开发不适合 
+❌适合 
+✅
+
+----- 第 10 页 -----
+•LangServe，用于将 LangChainchains部署为 RESTAPI的包
+LangChain
+模块
+https://python.langchain.com/v0.2/docs/langserve/
+
+
+----- 第 11 页 -----
+•LangSmith：一个调试、测试、评估和监控LLM应用的开发者平台。
+LangChain
+模块
+https://docs.smith.langchain.com/
+•Tracing（追踪）功能：LangSmith 可以记录 LLM 应用的每次运行（Run），包括输入、输出、中间步骤、工具调用、API 请求等详细信息。•数据集管理功能：允许开发者创建、存储和管理测试数据集，用于评估和优化 LLM 应用。•评估（Evaluation）功能：提供工具来评估 LLM 应用的性能，支持自动化和手动评估。•监控（Monitoring）功能：在生产环境中实时监控 LLM 应用的性能和行为。•协作与版本控制功能：支持团队协作，提供项目管理和版本控制功能。•集成与扩展功能：LangSmith 无缝集成 LangChain，并支持其他 LLM 框架和工具。
+
+----- 第 12 页 -----
+•官方学习手册
+LangChain
+上手
+https://docs.langchain.com/oss/python/langchain/overview
+
+
+----- 第 13 页 -----
+LangChain
+ 
+RAG
+应用实战
+
+----- 第 14 页 -----
+•基于DeepSeekR1模型的多轮对话系统创建
+LangChain
+实战
+1
+-
+多轮对话系统
+Models模块
+创建LLM模型
+Prompts模块
+格式化用户输入
+Chains模块
+创建对话链
+
+----- 第 15 页 -----
+•Models模块，LangChain不托管任何 LLM，而是依赖于第三方集成，可使用langchain-openai等第三方库，通过API调用Deepseek模型
+LangChain
+实战
+1
+-
+多轮对话系统
+from langchain_openai import ChatOpenAIllm = ChatOpenAI(          api_key="sk-xxxxx",           base_url="https://api.deepseek.com/v1",           model="deepseek-chat")
+•也可以通过环境变量来设置key•也可以使用langchain_deepseek来构建模型
+
+----- 第 16 页 -----
+•Prompts模块，用于创建消息模板，包括系统消息/用户消息/聊天提示模板
+LangChain
+实战
+1
+-
+多轮对话系统from langchain.prompts import ChatPromptTemplate, SystemMessagePromptTemplate, HumanMessagePromptTemplate# 定义系统消息模板system_template = "你是⼀个多轮对话助⼿."system_message_prompt = SystemMessagePromptTemplate.from_template(system_template)# 定义⽤户消息模板human_template = "{text}"human_message_prompt = HumanMessagePromptTemplate.from_template(human_template)# 构建对话提示模板chat_prompt = ChatPromptTemplate.from_messages([system_message_prompt, human_message_prompt])SystemMessage表示一个角色为“系统”的消息，告诉模型如何行为。并不是所有模型提供者都支持此功能。HumanMessage将根据用户传入的输入变量进行格式化。ChatPromptTemplate聊天提示模板用于格式化消息列表。由多个子模板组成。
+
+----- 第 17 页 -----
+•chains模块，通常将大语言模型（LLM）与提示（Prompt）结合在一起，可以对文本或数据进行一系列操作。
+LangChain
+实战
+1
+-
+多轮对话系统
+from langchain.chains import LLMChainchain = LLMChain(llm=llm, prompt=chat_prompt)
+链接受用户输入，使用提示模板对其进行格式化，然后将格式化的响应传递给 LLM 。我们可以通过将多个链组合在一起，或者通过将链与其他组件组合在一起来构建更复杂的链。
+
+----- 第 18 页 -----
+•代码运行效果
+LangChain
+实战
+1
+-
+多轮对话系统
+
+
+----- 第 19 页 -----
+•基于Huggingface嵌入模型的本地多源数据加载与文本向量化
+（1-2）准备本地知识库文档，目前支持 txt、docx、md、pdf 格式文件，使用Unstructured Loader类加载文件，获取文本信息（3-4）对文本进行分割，将大量文本信息切分为chunks（5）选择一种embedding算法，对文本向量化（6）将embedding结果保存到数据库
+LangChain
+实战
+2
+-
+文本向量化
+https://github.com/chatchat-space/Langchain-Chatchat
+
+----- 第 20 页 -----
+•需要使用到的核心组件•步骤1：文本进行索引：加载文件，分割文本，进行索引。•步骤2：文本嵌入：使用OpenAIEmbeddings等进行嵌入。•步骤3：存储数据：将得到的向量保存在数据库。
+组件 类型子类型UnstructuredFileLoader等 索引组件文本加载器RecursiveCharacterTextSplitter索引组件文本分割器OpenAIEmbeddings/HuggingFaceEmbeddings模型组件文本嵌入模型Chroma 索引组件向量库
+LangChain
+实战
+2
+-
+文本向量化
+
+----- 第 21 页 -----
+•文档加载支持的格式类型
+LangChain
+实战
+2
+-
+文本向量化
+需要加载的相关库from langchain_community.document_loaders import UnstructuredFileLoaderfrom langchain_community.document_loaders.csv_loader import CSVLoaderfrom langchain_community.document_loaders import UnstructuredHTMLLoaderfrom langchain_community.document_loaders import JSONLoaderfrom langchain_community.document_loaders import UnstructuredMarkdownLoaderfrom langchain_community.document_loaders import PyPDFLoaderfrom langchain_community.document_loaders import AzureAIDocumentIntelligenceLoader # 需要APIfrom langchain_community.document_loaders import DirectoryLoader
+csvhtmljsonmarkdownpdfdocx, xlsx,pptx本地⽬录txt
+
+----- 第 22 页 -----
+•文档分割
+LangChain
+实战
+2
+-
+文本向量化
+from langchain.text_splitter import RecursiveCharacterTextSplittertext_splitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=0)# chunk_size为每个分⽚的最⼤⼤⼩，chunk_overlap分⽚之间的覆盖⼤⼩split_docs = text_splitter.split_documents(data)
+默认的分割符为[“\n\n”, “\n”, “ ”, “”]，中文不一定合适，可以重写
+text_splitter = RecursiveCharacterTextSplitter(separators=["\n\n","\n"," ",".",",","\u200b",  # Zero-width space"\uff0c",  # Fullwidth comma"\u3001",  # Ideographic comma"\uff0e",  # Fullwidth full stop"\u3002",  # Ideographic full stop"",],# Existing args)
+
+----- 第 23 页 -----
+•载入文档、切分
+LangChain
+实战
+2
+-
+文本向量化
+
+
+----- 第 24 页 -----
+•目前有两种常见嵌入方案•使用简单，并且效果比较好；•会消耗openai的token，特别是大段文本时，消耗的token还不少，如果知识库是比较固定的，可以考虑将每次生成的embedding做持久化，这样就不需要再调用openai了，可以大大节约token的消耗；•可能会有数据泄露的风险，如果是一些高度私密的数据，不建议直接调用。OpenAlEmbeddings
+•可以用HuggingFace模型来进行实验，数据都是在本机上进行计算•需要一定的硬件支持，最好是有GPU支持，不然生成数据可能会非常慢•生成的向量效果可能不是很好，HuggingFace上的中文向量模型不是很多。HuggingFaceEmbeddings
+LangChain
+实战
+2
+-
+文本向量化
+
+----- 第 25 页 -----
+•Huggingface嵌入模型配置
+LangChain
+实战
+2
+-
+文本向量化
+去Huggingface模型库中选择模型，根据sentence similarity或者feature extraction进行过滤
+
+
+----- 第 26 页 -----
+•多种不同的调用方式，从Inference Providers中获取
+LangChain
+实战
+2
+-
+文本向量化
+HF Inference API在线推理试用，Hugging Face 官方部署提供算力。
+
+----- 第 27 页 -----
+•将模型下载到本地，可加快速度
+LangChain
+实战
+2
+-
+文本向量化
+https://huggingface.co/GanymedeNil/text2vec-large-chinese/tree/main
+
+
+----- 第 28 页 -----
+•Huggingface嵌入模型配置
+LangChain
+实战
+2
+-
+文本向量化from langchain_huggingface import HuggingFaceEmbeddingsEMBEDDING_MODEL = "text2vec"embedding_model_dict = {"text2vec": "embedding_models/text2vec-large-chinese" # 使⽤本地⽬录}embeddings = HuggingFaceEmbeddings(model_name=embedding_model_dict[EMBEDDING_MODEL],model_kwargs={"device": ”cpu", "trust_remote_code": True}encode_kwargs={"normalize_embeddings": True, "batch_size": 32}multi_process="False",show_progress="True")model_name参数：指定 Hugging Face 上的预训练模型名称或本地路径model_kwargs：用于控制模型加载行为，常见选项入device: 指定设备（如"cuda","cpu"）encode_kwargs：控制文本编码（推理）过程multi_process：是否启用多进程加速show_progress:是否显示嵌入生成的进度条
+
+----- 第 29 页 -----
+•使用Chroma库在本地存储知识
+LangChain
+实战
+2
+-
+文本向量化
+
+
+----- 第 30 页 -----
+•基于Chroma与PyQT的本地知识库检索问答系统搭建
+（1-2）准备本地知识库文档，目前支持 txt、docx、md、pdf 格式文件，使用Unstructured Loader类加载文件，获取文本信息（3-4）对文本进行分割，将大量文本信息切分为chunks（5）选择一种embedding算法，对文本向量化（6）将知识库得到的embedding结果保存到数据库（8-9）将问题也用同样的embedding算法，对问题向量化（10）从数据库中查找和问题向量最相似的N个文本信息（11）得到和问题相关的上下文文本信息（12）获取提示模板（13）得到输入大模型的prompt，比如：问题，通过以下信息汇总得到答案。（14）将prompt输入到LLM得到答案
+LangChain
+实战
+3
+-
+问答系统搭建
+https://github.com/chatchat-space/Langchain-Chatchat
+
+----- 第 31 页 -----
+•需要使用到的核心组件
+组件 类型⼦类型OpenAIEmbeddings/HuggingFaceEmbeddings模型组件⽂本嵌⼊模型ChatOpenAI模型组件LLMRetrievalQA检索组件检索器
+LangChain
+实战
+3
+-
+问答系统搭建
+•检索器：检索器可以搜索数据集，查询相关文本片段。•对话链：使用链来调度模型和检索器，接收理解用户输入，检索文本片段后生成答案。
+
+----- 第 32 页 -----
+•使用检索器来构建文档问答能力
+LangChain
+实战
+3
+-
+问答系统搭建
+db = Chroma(persist_directory="data/doc_embeding", embedding_function=embeddings)retriever = db.as_retriever()from langchain.chains import RetrievalQAfrom langchain_openai import ChatOpenAIllm = ChatOpenAI(temperature=0.95,model="deepseek-chat”)qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
+
+----- 第 33 页 -----
+•使用PyQT进行界面封装
+LangChain
+实战
+3
+-
+问答系统搭建
+1.支持本地选择数据库2.支持问题输入与结果展示
+
+
+----- 第 34 页 -----
+•如何改进检索性能
+LangChain
+实战
+-
+综合思考
+⽂本分割⽅式LLM模型嵌⼊模型嵌⼊模型参数
+1. 检验大模型是否能够准确的理解用户问题？2. 检验大模型是否能够准确的提炼文档的信息，并给出准确的答案？3. 检验大模型是否具备一定的推理能力？
+
+----- 第 35 页 -----
+三人行，必有
+AI
+扫一扫，关注有三
+AI
+公众号
+有三
+AI
+
