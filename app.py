@@ -10,6 +10,7 @@ from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.output_parsers import StrOutputParser
 
 from config import (
+    KNOWLEDGE_DIR,
     VECTOR_DB_PATH,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_DEVICE,
@@ -97,12 +98,12 @@ def init_qa_system():
             | StrOutputParser()
     )
 
-    return qa_chain, retriever
+    return qa_chain, retriever, embeddings, db
 
 
 # ---------- 初始化系统 ----------
 with st.spinner("系统正在初始化，请稍候（第一次加载嵌入模型需要几分钟）..."):
-    qa_chain, retriever = init_qa_system()
+    qa_chain, retriever, embeddings, db = init_qa_system()
 
 st.success("✅ 系统初始化完成，可以开始提问了！")
 st.divider()
@@ -132,25 +133,93 @@ with st.sidebar:
     st.write("4. 问题答案都来自你上传的文档")
     
     st.divider()
+
+    st.header("📚 知识库文档")
+    kb_files = sorted(
+        f for f in os.listdir(KNOWLEDGE_DIR)
+        if os.path.isfile(os.path.join(KNOWLEDGE_DIR, f))
+    )
+    if kb_files:
+        for name in kb_files:
+            st.write(f"📄 {name}")
+    else:
+        st.write("（暂无文档）")
+
+    st.divider()
     st.header("📤 上传文档到知识库")
+    if "upload_round" not in st.session_state:
+        st.session_state.upload_round = 0
     uploaded_files = st.file_uploader(
         "支持 PDF / TXT / DOCX / MD",
         type=["pdf", "txt", "docx", "md"],
         accept_multiple_files=True,
-        key="uploader"
+        key=f"uploader_{st.session_state.upload_round}"
     )
     if uploaded_files:
         if st.button("🚀 添加到知识库"):
-            import os
-            from config import KNOWLEDGE_DIR
-            
-            with st.spinner("正在处理文档..."):
+            with st.spinner("正在保存并向量化新文档，请稍候..."):
+                import json
+                from config import (
+                    KNOWLEDGE_DIR,
+                    SEMANTIC_BREAKPOINT_PERCENTILE,
+                    SEMANTIC_THRESHOLD_FLOOR,
+                    SEMANTIC_MAX_CHUNK,
+                    SEMANTIC_OVERLAP_SENTS,
+                )
+                from build_database import load_documents
+                from semantic_splitter import split_documents_semantic
+
+                # 1. 保存文件到 knowledge_base（重名直接覆盖）
+                new_files = []
                 for uploaded_file in uploaded_files:
                     save_path = os.path.join(KNOWLEDGE_DIR, uploaded_file.name)
+                    if os.path.exists(save_path):
+                        st.info(f"📝 {uploaded_file.name} 已存在，将覆盖旧版本")
                     with open(save_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
-                st.success(f"✅ 已添加 {len(uploaded_files)} 个文档到 knowledge_base 文件夹")
-                st.info("💡 请运行 build_database.py 重建向量库，或重启应用自动加载")
+                    new_files.append(uploaded_file.name)
+
+                # 2. 只加载新文件并语义分块
+                docs = load_documents(only_files=new_files)
+                split_docs = split_documents_semantic(
+                    docs,
+                    embeddings,
+                    percentile=SEMANTIC_BREAKPOINT_PERCENTILE,
+                    floor=SEMANTIC_THRESHOLD_FLOOR,
+                    max_chunk_size=SEMANTIC_MAX_CHUNK,
+                    overlap_sents=SEMANTIC_OVERLAP_SENTS,
+                )
+
+                # 3. 先删除这些文件旧的向量（重名覆盖时保证库里只有新内容）
+                chunks_file = os.path.join(VECTOR_DB_PATH, "chunks.json")
+                old_chunks = []
+                if os.path.exists(chunks_file):
+                    with open(chunks_file, "r", encoding="utf-8") as f:
+                        old_chunks = json.load(f)
+                for name in new_files:
+                    source = os.path.join(KNOWLEDGE_DIR, name)
+                    db.delete(where={"source": source})
+                    old_chunks = [
+                        c for c in old_chunks
+                        if c["metadata"].get("source") != source
+                    ]
+
+                # 4. 增量写入向量库（不清空其他文档的数据）
+                db.add_documents(split_docs)
+
+                # 5. 更新 chunks.json（供 BM25 检索复用）
+                new_chunks = old_chunks + [
+                    {"content": doc.page_content, "metadata": doc.metadata}
+                    for doc in split_docs
+                ]
+                with open(chunks_file, "w", encoding="utf-8") as f:
+                    json.dump(new_chunks, f, ensure_ascii=False, indent=2)
+
+                st.success(f"✅ 已添加 {len(new_files)} 个文档：{', '.join(new_files)}")
+                st.info(f"💡 共向量化 {len(split_docs)} 个文本块，现在可以直接提问了")
+
+                # 重置上传组件，清空已选文件
+                st.session_state.upload_round += 1
 
 # ---------- 聊天界面 ----------
 if "chat_history" not in st.session_state:

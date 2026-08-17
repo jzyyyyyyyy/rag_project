@@ -28,11 +28,12 @@ from config import (
     EMBEDDING_NORMALIZE,
 )
 
-def load_documents():
+def load_documents(only_files=None):
     """
     步骤1：加载知识库文件夹中的所有文档
     手动遍历文件夹，根据后缀选择对应的加载器
     支持 .pdf / .txt / .docx / .md
+    only_files：只加载指定文件名（用于网页上传后的增量入库）
     """
     print("=" * 60)
     print("步骤1：正在加载知识库文档...")
@@ -42,6 +43,8 @@ def load_documents():
     # 遍历文件夹
     for root, dirs, files in os.walk(KNOWLEDGE_DIR):
         for file in files:
+            if only_files is not None and file not in only_files:
+                continue
             file_path = os.path.join(root, file)
             ext = os.path.splitext(file)[1].lower()
             try:
