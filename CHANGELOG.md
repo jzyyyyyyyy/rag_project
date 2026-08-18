@@ -61,6 +61,20 @@
 - 网页端增量入库与 `build_database.py` 全量重建互不冲突:上传走增量,重建走清库,两者最终状态一致
 - 覆盖重名文档依赖 Chroma 按 `source` 元数据删除,请勿修改 load_documents 中 source 路径的拼接方式
 
+### 8. 网页端三套 Prompt 风格切换 + 反馈模块修复 + 多轮改写接入(2026-08-18)
+
+> 针对陈述 PPT 核查发现的 3 处"代码与 CHANGELOG/文档声明不符"问题修复
+> 验证:py_compile 全量通过 + Streamlit AppTest 模拟反馈全流程通过
+
+| 改进项 | 说明 |
+|--------|------|
+| 三套 Prompt 风格接入网页端 | 原 app.py 内部硬编码单一模板(与 CHANGELOG 声称的"侧边栏回答风格下拉框"不符)。现删除硬编码模板,统一走 `qa_system.build_qa_chain(llm, style)`;侧边栏新增「回答风格」下拉框(严谨/平衡/宽松),选择存 `st.session_state["prompt_style"]`,提问时按当前风格实时构建链,实现网页端实时切换 |
+| 反馈模块结构性修复 | 原反馈按钮/面板全部写在 `if user_input := st.chat_input(...)` 块内,点击 👍/👎 触发重跑时 `chat_input` 返回空,整个块(含反馈 UI)不渲染,差评后反馈模块永不弹出;且「提交反馈」按钮嵌套在「👎 无用」按钮的 if 块内,二次点击不生效。现改为在历史消息渲染循环内渲染反馈 UI,面板显隐由 `st.session_state[f"fb_{id}_show"]` 控制,「提交反馈」独立于其它按钮 if 块,正常写入 feedback_log.txt |
+| 多轮问题改写接入网页端 | 原 app.py 提问直接用原句检索,无指代还原(与 CHANGELOG 声称不符)。现统一调用 `qa_system.ask()`(问题改写 → 混合检索 → 相似度排序 → 生成),「它/这个」等指代词可正确还原 |
+| 历史消息结构 | assistant 消息入历史时附带 `id/question/docs`,参考原文 expander 移至渲染循环,每条附来源与距离分数 |
+| init_qa_system 调整 | 由返回 `(qa_chain, retriever, embeddings, db)` 改为返回 `(llm, retriever, db, embeddings)`,链按当前风格在提问时构建(模型/检索器仍缓存) |
+| 侧边栏信息修正 | "分块大小:256 字符"已过时,改为"语义分块(≤500 字符)" |
+
 ---
 
 ## 此前 jxytest 分支修改

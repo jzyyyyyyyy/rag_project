@@ -4,25 +4,24 @@ import json
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
 import streamlit as st
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel
-from langchain_core.output_parsers import StrOutputParser
 
+from qa_system import (
+    build_embeddings,
+    build_llm,
+    build_hybrid_retriever,
+    build_condense_chain,
+    build_qa_chain,
+    ask,
+)
 from config import (
     KNOWLEDGE_DIR,
     USER_DOCS_DIR,
     VECTOR_DB_PATH,
     EMBEDDING_MODEL_NAME,
-    EMBEDDING_DEVICE,
-    EMBEDDING_NORMALIZE,
-    DEEPSEEK_API_KEY,
-    LLM_BASE_URL,
     LLM_MODEL,
-    LLM_TEMPERATURE,
     RETRIEVAL_TOP_K,
+    PROMPT_TEMPLATES,
+    DEFAULT_PROMPT_STYLE,
 )
 
 # 确保目录存在（首次运行或目录被删除时自动创建，避免报错）
@@ -46,66 +45,11 @@ st.divider()
 # ---------- 缓存加载系统 ----------
 @st.cache_resource
 def init_qa_system():
-    """初始化整个问答系统，结果缓存，只运行一次"""
-    # 1. 嵌入模型
-    embeddings = HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL_NAME,
-        model_kwargs={"device": EMBEDDING_DEVICE},
-        encode_kwargs={"normalize_embeddings": EMBEDDING_NORMALIZE},
-    )
-
-    # 2. 加载 Chroma 向量库
-    db = Chroma(
-        persist_directory=VECTOR_DB_PATH,
-        embedding_function=embeddings,
-    )
-    retriever = db.as_retriever(search_kwargs={"k": RETRIEVAL_TOP_K})
-
-    # 3. 大语言模型
-    llm = ChatOpenAI(
-        api_key=DEEPSEEK_API_KEY,
-        base_url=LLM_BASE_URL,
-        model=LLM_MODEL,
-        temperature=LLM_TEMPERATURE,
-    )
-
-    # 4. Prompt 模板
-    prompt_template = """
-请根据以下【参考资料】回答问题。回答时请尽量引用原文关键句，并用自己的话解释。如果参考资料中没有直接答案，请根据已有信息推测，并注明"推测"。若完全无相关信息，再回答"无法回答"。
-
-回答规则：
-1. 只使用参考资料中的信息，不要编造资料中没有的内容
-2. 如果参考资料中没有相关信息，根据已有资料进行推测，并需要标明推测的过程和原因。
-3. 回答要条理清晰，重点突出
-4. 可以适当引用资料中的原文表述
-
-【参考资料】
-{context}
-
-【用户问题】
-{question}
-
-【你的回答】
-"""
-    prompt = ChatPromptTemplate.from_template(prompt_template)
-
-    # 5. 构建 LCEL 链
-    def format_docs(docs):
-        return "\n\n".join(doc.page_content for doc in docs)
-
-    qa_chain = (
-            RunnableParallel(
-                {
-                    "context": retriever | format_docs,
-                    "question": RunnablePassthrough(),
-                }
-            )
-            | prompt
-            | llm
-            | StrOutputParser()
-    )
-
-    return qa_chain, retriever, embeddings, db
+    """初始化系统资源（嵌入模型 / LLM / 混合检索器 / 向量库），结果缓存，只运行一次"""
+    embeddings = build_embeddings()
+    llm = build_llm()
+    retriever, db = build_hybrid_retriever(embeddings)
+    return llm, retriever, db, embeddings
 
 
 def cleanup_orphan_chunks(db, chunks_file):
@@ -146,7 +90,7 @@ def cleanup_orphan_chunks(db, chunks_file):
 
 # ---------- 初始化系统 ----------
 with st.spinner("系统正在初始化，请稍候（第一次加载嵌入模型需要几分钟）..."):
-    qa_chain, retriever, embeddings, db = init_qa_system()
+    llm, retriever, db, embeddings = init_qa_system()
     orphan_count = cleanup_orphan_chunks(
         db, os.path.join(VECTOR_DB_PATH, "chunks.json")
     )
@@ -170,17 +114,34 @@ with st.sidebar:
 
         **检索片段数**：Top-{RETRIEVAL_TOP_K}
 
-        **分块大小**：256 字符
+        **分块方式**：语义分块（≤500 字符）
         """
     )
     st.divider()
-    
+
+    st.header("🎛️ 回答风格")
+    style_options = list(PROMPT_TEMPLATES.keys())
+    default_index = (
+        style_options.index(DEFAULT_PROMPT_STYLE)
+        if DEFAULT_PROMPT_STYLE in style_options
+        else 0
+    )
+    st.selectbox(
+        "选择回答风格",
+        style_options,
+        index=default_index,
+        key="prompt_style",
+    )
+    st.caption("严谨：禁止推测 / 平衡：推测须标注 / 宽松：灵活回答")
+
+    st.divider()
+
     st.header("📖 使用说明")
     st.write("1. 在下方输入框输入你的问题")
     st.write("2. 按回车发送，系统会自动检索知识库")
     st.write("3. 回答下方可展开查看参考原文")
     st.write("4. 问题答案都来自你上传的文档")
-    
+
     st.divider()
 
     st.header("📚 知识库文档")
@@ -307,48 +268,92 @@ if "chat_history" not in st.session_state:
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
+        if msg["role"] != "assistant":
+            continue
 
-if user_input := st.chat_input("请输入你想问的问题..."):
-    st.session_state.chat_history.append({"role": "user", "content": user_input})
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    with st.chat_message("assistant"):
-        with st.spinner("🔍 正在检索知识库并生成回答..."):
-            source_docs = retriever.invoke(user_input)
-            answer = qa_chain.invoke(user_input)
-
-        st.markdown(answer)
+        msg_id = msg["id"]
 
         # ===== 用户反馈按钮 =====
-        feedback_key = f"feedback_{len(st.session_state.chat_history)}"
-        
         st.divider()
         col1, col2, col3 = st.columns([1, 1, 4])
         with col1:
-            if st.button("👍 有用", key=f"{feedback_key}_like"):
-                st.session_state[feedback_key] = "liked"
-                st.success("感谢您的反馈！")
+            if st.button("👍 有用", key=f"fb_{msg_id}_like"):
+                st.session_state[f"fb_{msg_id}_verdict"] = "liked"
         with col2:
-            if st.button("👎 无用", key=f"{feedback_key}_dislike"):
-                st.session_state[feedback_key] = "disliked"
-                st.warning("请告诉我们哪里有问题：")
-                feedback_text = st.text_area("反馈内容", key=f"{feedback_key}_text")
-                if st.button("提交反馈", key=f"{feedback_key}_submit"):
-                    with open("feedback_log.txt", "a", encoding="utf-8") as f:
-                        f.write(f"问题: {user_input}\n")
-                        f.write(f"回答: {answer}\n")
-                        f.write(f"反馈: {feedback_text}\n")
-                        f.write("-" * 50 + "\n")
-                    st.success("感谢您的反馈，已记录！")
+            if st.button("👎 无用", key=f"fb_{msg_id}_dislike"):
+                st.session_state[f"fb_{msg_id}_verdict"] = "disliked"
+                st.session_state[f"fb_{msg_id}_show"] = True
 
-        with st.expander("📖 查看参考原文片段"):
-            for i, doc in enumerate(source_docs):
-                source = doc.metadata.get("source", "未知")
-                st.markdown(f"**片段 {i + 1}**（来源：{source}）")
-                st.write(doc.page_content)
-                st.divider()
+        if st.session_state.get(f"fb_{msg_id}_verdict") == "liked":
+            st.success("感谢您的反馈！")
+
+        # ===== 反馈输入面板（点差评后弹出） =====
+        if st.session_state.get(f"fb_{msg_id}_show"):
+            st.warning("请告诉我们哪里有问题：")
+            st.text_area("反馈内容", key=f"fb_{msg_id}_text")
+            if st.button("提交反馈", key=f"fb_{msg_id}_submit"):
+                with open("feedback_log.txt", "a", encoding="utf-8") as f:
+                    f.write(f"问题: {msg.get('question', '')}\n")
+                    f.write(f"回答: {msg['content']}\n")
+                    f.write(
+                        f"反馈: {st.session_state.get(f'fb_{msg_id}_text', '')}\n"
+                    )
+                    f.write("-" * 50 + "\n")
+                st.session_state[f"fb_{msg_id}_show"] = False
+                st.success("感谢您的反馈，已记录！")
+
+        # ===== 参考原文片段 =====
+        if msg.get("docs"):
+            with st.expander("📖 查看参考原文片段"):
+                for i, (content, source, score) in enumerate(msg["docs"]):
+                    st.markdown(
+                        f"**片段 {i + 1}**（来源：{source}，距离分数 {score:.4f}，越小越相似）"
+                    )
+                    st.write(content)
+                    st.divider()
+
+if user_input := st.chat_input("请输入你想问的问题..."):
+    # 多轮对话历史（只保留最近 6 轮，供问题改写链还原指代）
+    history = [
+        (m["role"], m["content"])
+        for m in st.session_state.chat_history[-12:]
+    ]
 
     st.session_state.chat_history.append(
-        {"role": "assistant", "content": answer}
+        {"role": "user", "content": user_input}
     )
+    with st.chat_message("user"):
+        st.markdown(user_input)
+
+    style = st.session_state.get("prompt_style", DEFAULT_PROMPT_STYLE)
+    qa_chain = build_qa_chain(llm, style)
+    condense_chain = build_condense_chain(llm)
+
+    with st.chat_message("assistant"):
+        with st.spinner("🔍 正在检索知识库并生成回答..."):
+            try:
+                answer, sorted_docs = ask(
+                    qa_chain, condense_chain, retriever, db, user_input, history
+                )
+            except Exception as e:
+                st.error(f"生成回答失败：{e}")
+                st.rerun()
+        st.markdown(answer)
+
+    st.session_state.chat_history.append(
+        {
+            "role": "assistant",
+            "content": answer,
+            "id": len(st.session_state.chat_history) + 1,
+            "question": user_input,
+            "docs": [
+                (
+                    doc.page_content,
+                    doc.metadata.get("source", "未知"),
+                    float(score),
+                )
+                for doc, score in sorted_docs
+            ],
+        }
+    )
+    st.rerun()
