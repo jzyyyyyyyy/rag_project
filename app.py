@@ -273,22 +273,30 @@ for msg in st.session_state.chat_history:
 
         msg_id = msg["id"]
 
-        # ===== 用户反馈按钮 =====
+        # ===== 用户反馈（互斥单选，可来回切换） =====
         st.divider()
+        verdict = st.session_state.get(f"fb_{msg_id}_verdict")
+        show_panel = st.session_state.get(f"fb_{msg_id}_show", False)
         col1, col2, col3 = st.columns([1, 1, 4])
         with col1:
             if st.button("👍 有用", key=f"fb_{msg_id}_like"):
                 st.session_state[f"fb_{msg_id}_verdict"] = "liked"
+                st.session_state[f"fb_{msg_id}_show"] = False
+                st.rerun()
         with col2:
             if st.button("👎 无用", key=f"fb_{msg_id}_dislike"):
                 st.session_state[f"fb_{msg_id}_verdict"] = "disliked"
                 st.session_state[f"fb_{msg_id}_show"] = True
+                st.session_state.pop(f"fb_{msg_id}_submitted", None)
+                st.rerun()
 
-        if st.session_state.get(f"fb_{msg_id}_verdict") == "liked":
+        if verdict == "liked":
             st.success("感谢您的反馈！")
+        elif st.session_state.get(f"fb_{msg_id}_submitted"):
+            st.success("感谢您的反馈，已记录！")
 
-        # ===== 反馈输入面板（点差评后弹出） =====
-        if st.session_state.get(f"fb_{msg_id}_show"):
+        # ===== 反馈输入面板（仅差评时弹出，点有用即关闭） =====
+        if verdict == "disliked" and show_panel:
             st.warning("请告诉我们哪里有问题：")
             st.text_area("反馈内容", key=f"fb_{msg_id}_text")
             if st.button("提交反馈", key=f"fb_{msg_id}_submit"):
@@ -299,8 +307,9 @@ for msg in st.session_state.chat_history:
                         f"反馈: {st.session_state.get(f'fb_{msg_id}_text', '')}\n"
                     )
                     f.write("-" * 50 + "\n")
+                st.session_state[f"fb_{msg_id}_submitted"] = True
                 st.session_state[f"fb_{msg_id}_show"] = False
-                st.success("感谢您的反馈，已记录！")
+                st.rerun()
 
         # ===== 参考原文片段 =====
         if msg.get("docs"):
