@@ -1,14 +1,19 @@
 import os
+import json
+
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
 import streamlit as st
 from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnableParallel
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 from langchain_core.output_parsers import StrOutputParser
 
 from config import (
+    KNOWLEDGE_DIR,
+    USER_DOCS_DIR,
     VECTOR_DB_PATH,
     EMBEDDING_MODEL_NAME,
     EMBEDDING_DEVICE,
@@ -20,14 +25,18 @@ from config import (
     RETRIEVAL_TOP_K,
 )
 
+# 确保目录存在（首次运行或目录被删除时自动创建，避免报错）
+os.makedirs(KNOWLEDGE_DIR, exist_ok=True)
+os.makedirs(USER_DOCS_DIR, exist_ok=True)
+
 # ---------- 页面基础配置 ----------
 st.set_page_config(
     page_title="RAG 知识库智能问答助手",
-    page_icon="",
+    page_icon="📚",
     layout="wide",
 )
 
-st.title("基于 RAG 的知识库智能问答助手")
+st.title("📚 基于 RAG 的知识库智能问答助手")
 st.caption(
     "技术栈：LangChain + Chroma 向量数据库 + DeepSeek 大模型 + text2vec 中文嵌入模型"
 )
@@ -62,8 +71,7 @@ def init_qa_system():
 
     # 4. Prompt 模板
     prompt_template = """
-请根据以下【参考资料】回答问题。回答时请尽量引用原文关键句，并用自己的话解释。如果参考资料中没有直接答案，请根据已有信息推测，并注明“推测”。若完全无相关信息，再回答“无法回答”。
-    
+请根据以下【参考资料】回答问题。回答时请尽量引用原文关键句，并用自己的话解释。如果参考资料中没有直接答案，请根据已有信息推测，并注明"推测"。若完全无相关信息，再回答"无法回答"。
 
 回答规则：
 1. 只使用参考资料中的信息，不要编造资料中没有的内容
@@ -81,46 +89,77 @@ def init_qa_system():
 """
     prompt = ChatPromptTemplate.from_template(prompt_template)
 
-    # 5. 辅助函数
+    # 5. 构建 LCEL 链
     def format_docs(docs):
         return "\n\n".join(doc.page_content for doc in docs)
 
-    def format_chat_history(chat_history):
-        if not chat_history:
-            return "无历史对话"
-        recent = chat_history[-6:]  # 最近3轮
-        return "\n".join([f"{msg['role']}: {msg['content']}" for msg in recent])
-
-    # 6. 构建 LCEL 链（输入为字典 {"question": ..., "chat_history": [...]}）
     qa_chain = (
-        RunnableParallel(
-            {
-                "context": lambda inputs: format_docs(retriever.invoke(inputs["question"])),
-                "question": lambda inputs: f"【历史对话】\n{format_chat_history(inputs['chat_history'])}\n\n【当前问题】\n{inputs['question']}",
-            }
-        )
-        | prompt
-        | llm
-        | StrOutputParser()
+            RunnableParallel(
+                {
+                    "context": retriever | format_docs,
+                    "question": RunnablePassthrough(),
+                }
+            )
+            | prompt
+            | llm
+            | StrOutputParser()
     )
 
-    return qa_chain, retriever
+    return qa_chain, retriever, embeddings, db
 
 
-# ---------- 初始化聊天历史（必须在调用 init_qa_system 之前） ----------
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
+def cleanup_orphan_chunks(db, chunks_file):
+    """
+    删除向量库中源文件已不存在的文本块（如手动删除了 user_docs 里的文件）。
+    同步清理 Chroma 与 chunks.json，返回清理的条数。
+    """
+    valid_sources = set()
+    for base in (KNOWLEDGE_DIR, USER_DOCS_DIR):
+        if os.path.isdir(base):
+            valid_sources.update(
+                os.path.join(base, f)
+                for f in os.listdir(base)
+                if os.path.isfile(os.path.join(base, f))
+            )
+
+    metadatas = db._collection.get(include=["metadatas"])["metadatas"]
+    orphan_sources = {
+        m.get("source")
+        for m in metadatas
+        if m and m.get("source") not in valid_sources
+    }
+    cleaned = 0
+    for source in orphan_sources:
+        db.delete(where={"source": source})
+        cleaned += 1
+    if cleaned > 0 and os.path.exists(chunks_file):
+        with open(chunks_file, "r", encoding="utf-8") as f:
+            chunks = json.load(f)
+        chunks = [
+            c for c in chunks
+            if c["metadata"].get("source") not in orphan_sources
+        ]
+        with open(chunks_file, "w", encoding="utf-8") as f:
+            json.dump(chunks, f, ensure_ascii=False, indent=2)
+    return cleaned
+
 
 # ---------- 初始化系统 ----------
 with st.spinner("系统正在初始化，请稍候（第一次加载嵌入模型需要几分钟）..."):
-    qa_chain, retriever = init_qa_system()
+    qa_chain, retriever, embeddings, db = init_qa_system()
+    orphan_count = cleanup_orphan_chunks(
+        db, os.path.join(VECTOR_DB_PATH, "chunks.json")
+    )
 
-st.success("系统初始化完成，可以开始提问了！")
+if orphan_count:
+    st.warning(f"🧹 已自动清理 {orphan_count} 条失效文档的向量（源文件已不存在）")
+
+st.success("✅ 系统初始化完成，可以开始提问了！")
 st.divider()
 
 # ---------- 侧边栏 ----------
 with st.sidebar:
-    st.header("系统信息")
+    st.header("⚙️ 系统信息")
     st.info(
         f"""
         **嵌入模型**：{EMBEDDING_MODEL_NAME}
@@ -135,39 +174,175 @@ with st.sidebar:
         """
     )
     st.divider()
-    st.header("使用说明")
+    
+    st.header("📖 使用说明")
     st.write("1. 在下方输入框输入你的问题")
     st.write("2. 按回车发送，系统会自动检索知识库")
     st.write("3. 回答下方可展开查看参考原文")
     st.write("4. 问题答案都来自你上传的文档")
+    
+    st.divider()
+
+    st.header("📚 知识库文档")
+    st.caption("项目自带:")
+    kb_files = sorted(
+        f for f in os.listdir(KNOWLEDGE_DIR)
+        if os.path.isfile(os.path.join(KNOWLEDGE_DIR, f))
+    )
+    if kb_files:
+        for name in kb_files:
+            st.write(f"📄 {name}")
+    else:
+        st.write("（无）")
+    st.caption("用户上传:")
+    user_files = sorted(
+        f for f in os.listdir(USER_DOCS_DIR)
+        if os.path.isfile(os.path.join(USER_DOCS_DIR, f))
+    )
+    if user_files:
+        for name in user_files:
+            st.write(f"📄 {name}")
+    else:
+        st.write("（无）")
+
+    st.divider()
+    st.header("📤 上传文档到知识库")
+    if "upload_round" not in st.session_state:
+        st.session_state.upload_round = 0
+    if "upload_notice" not in st.session_state:
+        st.session_state.upload_notice = None
+    if st.session_state.upload_notice:
+        st.success(st.session_state.upload_notice)
+        st.session_state.upload_notice = None
+    uploaded_files = st.file_uploader(
+        "支持 PDF / TXT / DOCX / MD",
+        type=["pdf", "txt", "docx", "md"],
+        accept_multiple_files=True,
+        key=f"uploader_{st.session_state.upload_round}"
+    )
+    if uploaded_files:
+        if st.button("🚀 添加到知识库"):
+            with st.spinner("正在保存并向量化新文档，请稍候..."):
+                from config import (
+                    SEMANTIC_BREAKPOINT_PERCENTILE,
+                    SEMANTIC_THRESHOLD_FLOOR,
+                    SEMANTIC_MAX_CHUNK,
+                    SEMANTIC_OVERLAP_SENTS,
+                )
+                from build_database import load_documents
+                from semantic_splitter import split_documents_semantic
+
+                # 1. 保存文件到 user_docs（重名直接覆盖）
+                new_files = []
+                overwritten = []
+                for uploaded_file in uploaded_files:
+                    save_path = os.path.join(USER_DOCS_DIR, uploaded_file.name)
+                    if os.path.exists(save_path):
+                        overwritten.append(uploaded_file.name)
+                    with open(save_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    new_files.append(uploaded_file.name)
+
+                # 2. 只加载新文件并语义分块
+                docs = load_documents(only_files=new_files)
+                split_docs = split_documents_semantic(
+                    docs,
+                    embeddings,
+                    percentile=SEMANTIC_BREAKPOINT_PERCENTILE,
+                    floor=SEMANTIC_THRESHOLD_FLOOR,
+                    max_chunk_size=SEMANTIC_MAX_CHUNK,
+                    overlap_sents=SEMANTIC_OVERLAP_SENTS,
+                )
+
+                # 3. 先删除这些文件旧的向量（重名覆盖时保证库里只有新内容）
+                chunks_file = os.path.join(VECTOR_DB_PATH, "chunks.json")
+                old_chunks = []
+                if os.path.exists(chunks_file):
+                    with open(chunks_file, "r", encoding="utf-8") as f:
+                        old_chunks = json.load(f)
+                for name in new_files:
+                    source = os.path.join(USER_DOCS_DIR, name)
+                    db.delete(where={"source": source})
+                    old_chunks = [
+                        c for c in old_chunks
+                        if c["metadata"].get("source") != source
+                    ]
+
+                # 4. 增量写入向量库（不清空其他文档的数据）
+                db.add_documents(split_docs)
+
+                # 5. 更新 chunks.json（供 BM25 检索复用）
+                new_chunks = old_chunks + [
+                    {"content": doc.page_content, "metadata": doc.metadata}
+                    for doc in split_docs
+                ]
+                with open(chunks_file, "w", encoding="utf-8") as f:
+                    json.dump(new_chunks, f, ensure_ascii=False, indent=2)
+
+                notice = f"✅ 已添加 {len(new_files)} 个文档：{', '.join(new_files)}"
+                if overwritten:
+                    notice += f"（{'、'.join(overwritten)} 已覆盖旧版本）"
+                notice += f"，共向量化 {len(split_docs)} 个文本块，现在可以直接提问了"
+                st.session_state.upload_notice = notice
+
+                # 重置上传组件，清空已选文件
+                st.session_state.upload_round += 1
+                st.rerun()
+
+    st.divider()
+    if st.button("🧹 清理失效文档向量"):
+        with st.spinner("正在清理失效向量..."):
+            cleaned = cleanup_orphan_chunks(
+                db, os.path.join(VECTOR_DB_PATH, "chunks.json")
+            )
+        if cleaned:
+            st.success(f"已清理 {cleaned} 条失效文档向量")
+        else:
+            st.success("没有发现失效文档向量")
 
 # ---------- 聊天界面 ----------
-# 显示历史消息
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
 for msg in st.session_state.chat_history:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 if user_input := st.chat_input("请输入你想问的问题..."):
-    # 显示用户问题
     st.session_state.chat_history.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # 生成回答
     with st.chat_message("assistant"):
-        with st.spinner("正在检索知识库并生成回答..."):
-            # 先检索源文档（用于展示引用）
+        with st.spinner("🔍 正在检索知识库并生成回答..."):
             source_docs = retriever.invoke(user_input)
-            # 调用链时传入包含 question 和 chat_history 的字典
-            answer = qa_chain.invoke({
-                "question": user_input,
-                "chat_history": st.session_state.chat_history
-            })
+            answer = qa_chain.invoke(user_input)
 
         st.markdown(answer)
 
-        # 可折叠的参考原文
-        with st.expander("查看参考原文片段"):
+        # ===== 用户反馈按钮 =====
+        feedback_key = f"feedback_{len(st.session_state.chat_history)}"
+        
+        st.divider()
+        col1, col2, col3 = st.columns([1, 1, 4])
+        with col1:
+            if st.button("👍 有用", key=f"{feedback_key}_like"):
+                st.session_state[feedback_key] = "liked"
+                st.success("感谢您的反馈！")
+        with col2:
+            if st.button("👎 无用", key=f"{feedback_key}_dislike"):
+                st.session_state[feedback_key] = "disliked"
+                st.warning("请告诉我们哪里有问题：")
+                feedback_text = st.text_area("反馈内容", key=f"{feedback_key}_text")
+                if st.button("提交反馈", key=f"{feedback_key}_submit"):
+                    with open("feedback_log.txt", "a", encoding="utf-8") as f:
+                        f.write(f"问题: {user_input}\n")
+                        f.write(f"回答: {answer}\n")
+                        f.write(f"反馈: {feedback_text}\n")
+                        f.write("-" * 50 + "\n")
+                    st.success("感谢您的反馈，已记录！")
+
+        with st.expander("📖 查看参考原文片段"):
             for i, doc in enumerate(source_docs):
                 source = doc.metadata.get("source", "未知")
                 st.markdown(f"**片段 {i + 1}**（来源：{source}）")
